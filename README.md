@@ -1,1 +1,1 @@
-# Data-Science-Projects-w-R
+# Data Science Projects w/ R
