@@ -1,0 +1,225 @@
+---
+title: "Rental Bike Model"
+author: "Kevin Zhang)"
+date: "01/05/2024"
+output:
+  pdf_document: 
+    df_print: paged
+---
+
+
+```{r, warning = FALSE, message=FALSE}
+# This chunk is reserved for loading packages.
+library(leaps)
+library(randomForest)
+library(glmnet)
+library(pls)
+library(tree)
+```
+
+#Reading in Data
+
+```{r}
+train_data = read.table("train.csv", header = T, sep = ",")
+rownames(train_data) = train_data[,15]
+```
+
+#Exploring the Training Data
+
+```{r}
+sum(is.na(train_data)) #check for missing values, no missing values
+nrow(unique(train_data)) #check for unique values, each observation is unique
+str(train_data) #checking data type of columns
+
+#Changing data types of certain columns
+#Fixing because summary is showing these columns as character values
+train_data$Seasons = as.factor(train_data$Seasons)
+train_data$Holiday = as.factor(train_data$Holiday)
+train_data$Functioning = as.factor(train_data$Functioning)
+train_data$Date = as.Date(train_data$Date, "%d/%m/%Y")
+
+summary(train_data)
+```
+
+```{r}
+#Plots for Predictors
+par(mfrow = c(2,2))
+plot(train_data$Date, train_data$Count)
+plot(train_data$Hour, train_data$Count)
+plot(train_data$Temperature, train_data$Count)
+plot(train_data$Humidity, train_data$Count)
+plot(train_data$Wind, train_data$Count)
+plot(train_data$Visibility, train_data$Count)
+plot(train_data$Dew, train_data$Count)
+plot(train_data$Solar, train_data$Count)
+plot(train_data$Rainfall, train_data$Count)
+plot(train_data$Snowfall, train_data$Count)
+plot(train_data$Seasons, train_data$Count)
+plot(train_data$Holiday, train_data$Count)
+plot(train_data$Functioning, train_data$Count)
+```
+
+```{r}
+#Histograms for Quantitative Columns Other than Data & Hour
+par(mfrow = c(2,2))
+hist(train_data$Temperature, breaks = 15)
+hist(train_data$Humidity, breaks = 15)
+hist(train_data$Wind, breaks = 15)
+hist(train_data$Visibility, breaks = 15)
+hist(train_data$Dew, breaks = 15)
+hist(train_data$Solar, breaks = 15)
+hist(train_data$Rainfall, breaks = 15)
+hist(train_data$Snowfall, breaks = 15)
+```
+#Splitting the Data
+
+```{r}
+set.seed(1)
+training = sample(1:nrow(train_data), nrow(train_data) * .8)
+df_train = train_data[training, ]
+df_test = train_data[-training, ]
+```
+
+#Linear Regression
+
+```{r}
+mod = lm(Count ~ . -ID, data = df_train)
+summary(mod)
+lm_prediction = predict(mod, newdata = df_test)
+MSE = mean((df_test$Count - lm_prediction) ^ 2)
+MSE
+```
+#Ridge Regression
+
+```{r}
+set.seed(1)
+y_train = df_train$Count
+y_test = df_test$Count
+train_mat = model.matrix(Count ~ ., data = df_train)
+test_mat = model.matrix(Count ~ ., data = df_test)
+cv_out = cv.glmnet(train_mat, y_train, alpha = 0)
+plot(cv_out)
+best_lambda = cv_out$lambda.min
+best_lambda
+ridge_mod = glmnet(train_mat, y_train, alpha = 0)
+ridge_prediction = predict(ridge_mod, s = best_lambda, newx = test_mat)
+MSE_ridge = mean((y_test - ridge_prediction)^2)
+MSE_ridge
+```
+#Lasso Regression
+
+```{r}
+set.seed(1)
+cv_out1 = cv.glmnet(train_mat, y_train, alpha = 1)
+plot(cv_out1)
+best_lambda = cv_out1$lambda.min
+best_lambda
+lasso_mod = glmnet(train_mat, y_train, alpha = 1)
+lasso_prediction = predict(lasso_mod, s = best_lambda, newx = test_mat)
+MSE_lasso = mean((y_test - lasso_prediction)^2)
+MSE_lasso
+lasso_coef = predict(lasso_mod, s = best_lambda, type = "coefficients")[1:17,]
+lasso_coef[lasso_coef != 0]
+```
+
+#PCR
+```{r}
+set.seed(1)
+pcr_fit = pcr(Count ~., data = df_train, scale = TRUE, validation = "CV")
+validationplot(pcr_fit, val.type = "MSEP")
+summary(pcr_fit)
+pcr_prediction = predict(pcr_fit, df_test, ncomp = 12)
+MSE_pcr = mean((y_test - pcr_prediction)^2)
+MSE_pcr
+```
+
+#Partial Least Squares
+
+```{r}
+set.seed(1)
+pls_fit = plsr(Count ~ ., data = df_train, scale = TRUE, validation = "CV")
+validationplot(pls_fit, val.type = "MSEP")
+summary(pls_fit)
+pls_prediction = predict(pls_fit, df_test, ncomp = 10)
+MSE_pls = mean((y_test - pls_prediction)^2)
+MSE_pls
+```
+#Regression Tree
+
+```{r warning = FALSE}
+set.seed(1)
+tree = tree(Count ~., data = df_train)
+summary(tree)
+plot(tree)
+text(tree, pretty = 0)
+tree_prediction = predict(tree, df_test)
+MSE_tree = mean((df_test$Count - tree_prediction)^2)
+MSE_tree
+cv = cv.tree(tree, FUN = prune.tree)
+plot(cv$size, cv$dev, type = "b")
+plot(cv$k, cv$dev, type = "b")
+prune = prune.tree(tree, best = 11)
+plot(prune)
+text(prune, pretty = 0)
+prune_prediction = predict(prune, df_test)
+prune_MSE = mean((df_test$Count - prune_prediction)^2)
+prune_MSE
+```
+
+#Random Forest
+
+```{r}
+set.seed(1)
+random_forest = randomForest(Count ~., data = df_train, importance = TRUE)
+random_forest_predict = predict(random_forest, newdata = df_test)
+MSE_random = mean((df_test$Count - random_forest_predict)^2)
+MSE_random
+importance(random_forest)
+varImpPlot(random_forest)
+```
+```{r}
+MSE
+MSE_lasso
+MSE_pcr
+MSE_pls
+MSE_random
+MSE_ridge
+MSE_tree
+```
+#Predictions
+
+```{r}
+prediction_data = read.table("test.csv", header = T, sep = ",")
+prediction_data$Count = NA
+prediction_data$Seasons = as.factor(prediction_data$Seasons)
+prediction_data$Holiday = as.factor(prediction_data$Holiday)
+prediction_data$Functioning = as.factor(prediction_data$Functioning)
+prediction_data$Date = as.Date(prediction_data$Date, "%d/%m/%Y")
+par(mfrow = c(2,2))
+hist(prediction_data$Temperature, breaks = 15)
+hist(prediction_data$Humidity, breaks = 15)
+hist(prediction_data$Wind, breaks = 15)
+hist(prediction_data$Visibility, breaks = 15)
+hist(prediction_data$Dew, breaks = 15)
+hist(prediction_data$Solar, breaks = 15)
+hist(prediction_data$Rainfall, breaks = 15)
+hist(prediction_data$Snowfall, breaks = 15)
+#Transformations
+prediction_data$Wind = sqrt(prediction_data$Wind)
+prediction_data$Visibility = sqrt(prediction_data$Visibility)
+prediction_data$Solar = sqrt(prediction_data$Solar)
+#Predictions
+predictions = predict(random_forest, newdata = prediction_data)
+prediction_data$Count = predictions
+#Transformations
+prediction_data$Count = (prediction_data$Count)^2
+prediction_data$Wind = (prediction_data$Wind)^2
+prediction_data$Solar = (prediction_data$Solar)^2
+
+testing_predictions_4288877 = prediction_data[,-c(1:13)]
+student_id = rep(4288877, 2208)
+testing_predictions_4288877$student_id = student_id
+
+write.csv(testing_predictions_4288877, file = "testing_predictions_4288877.csv")
+```
+
